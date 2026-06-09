@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>海投助手 - 你的求职效率神器</title>
+  <!-- CDN引入所有依赖 -->
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <script src="https://unpkg.com/echarts/dist/echarts.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #app { height: 100%; }
+    .el-container { height: 100%; }
+    .el-aside { background-color: #2c3e50; }
+    .el-header { background-color: #fff; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; }
+    .el-main { padding: 20px; background-color: #f5f7fa; overflow-y: auto; }
+    .menu-item { color: #fff; }
+    .menu-item.is-active { background-color: #409eff !important; }
+    .card { margin-bottom: 20px; }
+    .stat-card { text-align: center; padding: 20px; }
+    .stat-number { font-size: 32px; font-weight: bold; color: #409eff; }
+    .chart-container { height: 300px; width: 100%; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <el-container>
+      <!-- 侧边栏导航 -->
+      <el-aside width="200px">
+        <div style="color: #fff; text-align: center; padding: 20px 0; font-size: 18px; font-weight: bold;">
+           海投助手
+        </div>
+        <el-menu
+          default-active="1"
+          class="el-menu-vertical-demo"
+          background-color="#2c3e50"
+          text-color="#fff"
+          active-text-color="#fff"
+          @select="handleMenuSelect"
+        >
+          <el-menu-item index="1" class="menu-item">数据统计</el-menu-item>
+          <el-menu-item index="2" class="menu-item">简历管理</el-menu-item>
+          <el-menu-item index="3" class="menu-item">职位管理</el-menu-item>
+          <el-menu-item index="4" class="menu-item">投递记录</el-menu-item>
+        </el-menu>
+      </el-aside>
+
+      <el-container>
+        <!-- 顶部栏 -->
+        <el-header>
+          <span style="font-size: 18px; font-weight: bold;">{{ currentPageTitle }}</span>
+          <div v-if="currentUser">
+            <span>欢迎你，{{ currentUser.username }}</span>
+            <el-button type="text" @click="logout" style="margin-left: 20px;">退出登录</el-button>
+          </div>
+        </el-header>
+
+        <!-- 主内容区 -->
+        <el-main>
+          <!-- 登录注册弹窗 -->
+          <el-dialog v-model="loginDialogVisible" title="登录/注册" width="400px">
+            <el-tabs v-model="loginTab">
+              <el-tab-pane label="登录" name="login">
+                <el-form :model="loginForm" label-width="80px">
+                  <el-form-item label="用户名">
+                    <el-input v-model="loginForm.username"></el-input>
+                  </el-form-item>
+                  <el-form-item label="密码">
+                    <el-input v-model="loginForm.password" type="password"></el-input>
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button type="primary" @click="handleLogin" block>登录</el-button>
+                  </el-form-item>
+                </el-form>
+              </el-tab-pane>
+              <el-tab-pane label="注册" name="register">
+                <el-form :model="registerForm" label-width="80px">
+                  <el-form-item label="用户名">
+                    <el-input v-model="registerForm.username"></el-input>
+                  </el-form-item>
+                  <el-form-item label="密码">
+                    <el-input v-model="registerForm.password" type="password"></el-input>
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button type="primary" @click="handleRegister" block>注册</el-button>
+                  </el-form-item>
+                </el-form>
+              </el-tab-pane>
+            </el-tabs>
+          </el-dialog>
+
+          <!-- 数据统计页 -->
+          <div v-if="currentPage === '1'">
+            <el-row :gutter="20">
+              <el-col :span="6">
+                <el-card class="card stat-card">
+                  <div class="stat-number">{{ stats.total }}</div>
+                  <div>总投递数</div>
+                </el-card>
+              </el-col>
+              <el-col :span="6">
+                <el-card class="card stat-card">
+                  <div class="stat-number">{{ stats.status.find(s => s.status === '已投递')?.count || 0 }}</div>
+                  <div>已投递</div>
+                </el-card>
+              </el-col>
+              <el-col :span="6">
+                <el-card class="card stat-card">
+                  <div class="stat-number">{{ stats.status.find(s => s.status === '面试中')?.count || 0 }}</div>
+                  <div>面试中</div>
+                </el-card>
+              </el-col>
+              <el-col :span="6">
+                <el-card class="card stat-card">
+                  <div class="stat-number">{{ stats.status.find(s => s.status === '已offer')?.count || 0 }}</div>
+                  <div>已offer</div>
+                </el-card>
+              </el-col>
+            </el-row>
+
+            <el-row :gutter="20">
+              <el-col :span="12">
+                <el-card class="card" title="近7天投递量">
+                  <div id="dailyChart" class="chart-container"></div>
+                </el-card>
+              </el-col>
+              <el-col :span="12">
+                <el-card class="card" title="职位状态分布">
+                  <div id="statusChart" class="chart-container"></div>
+                </el-card>
+              </el-col>
+            </el-row>
+          </div>
+
+          <!-- 简历管理页 -->
+          <div v-if="currentPage === '2'">
+            <el-button type="primary" @click="resumeDialogVisible = true" style="margin-bottom: 20px;">
+              + 添加简历
+            </el-button>
+
+            <el-card class="card">
+              <el-table :data="resumes" stripe border>
+                <el-table-column prop="name" label="简历名称" width="150"></el-table-column>
+                <el-table-column prop="phone" label="电话" width="120"></el-table-column>
+                <el-table-column prop="email" label="邮箱" width="200"></el-table-column>
+                <el-table-column label="操作" width="200">
+                  <template #default="scope">
+                    <el-button type="text" @click="downloadResume(scope.row)">下载</el-button>
+                    <el-button type="text" @click="deleteResume(scope.row.id)" style="color: #f56c6c;">删除</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+
+            <!-- 添加简历弹窗 -->
+            <el-dialog v-model="resumeDialogVisible" title="添加简历" width="600px">
+              <el-form :model="resumeForm" label-width="80px">
+                <el-form-item label="简历名称">
+                  <el-input v-model="resumeForm.name"></el-input>
+                </el-form-item>
+                <el-form-item label="电话">
+                  <el-input v-model="resumeForm.phone"></el-input>
+                </el-form-item>
+                <el-form-item label="邮箱">
+                  <el-input v-model="resumeForm.email"></el-input>
+                </el-form-item>
+                <el-form-item label="上传PDF">
+                  <el-upload
+                    action="http://localhost:3000/api/resumes"
+                    :data="{ userId: currentUser.id, ...resumeForm }"
+                    :on-success="handleResumeUploadSuccess"
+                    accept=".pdf"
+                    :show-file-list="false"
+                  >
+                    <el-button type="primary">选择文件</el-button>
+                  </el-upload>
+                </el-form-item>
+              </el-form>
+            </el-dialog>
+          </div>
+
+          <!-- 职位管理页 -->
+          <div v-if="currentPage === '3'">
+            <div style="margin-bottom: 20px; display: flex; gap: 10px; align-items: center;">
+              <el-button type="primary" @click="jobDialogVisible = true">+ 添加职位</el-button>
+              <el-button type="success" @click="crawlJobs">🔍 一键抓取大厂职位</el-button>
+              <el-select v-model="jobStatusFilter" @change="loadJobs" style="width: 150px;">
+                <el-option label="全部状态" value="all"></el-option>
+                <el-option label="未投递" value="未投递"></el-option>
+                <el-option label="已投递" value="已投递"></el-option>
+                <el-option label="面试中" value="面试中"></el-option>
+                <el-option label="已拒绝" value="已拒绝"></el-option>
+                <el-option label="已offer" value="已offer"></el-option>
+              </el-select>
+            </div>
+
+            <el-card class="card">
+              <el-table :data="jobs" stripe border>
+                <el-table-column prop="company" label="公司" width="150"></el-table-column>
+                <el-table-column prop="position" label="职位" width="150"></el-table-column>
+                <el-table-column prop="salary" label="薪资" width="120"></el-table-column>
+                <el-table-column prop="location" label="地点" width="100"></el-table-column>
+                <el-table-column prop="status" label="状态" width="100">
+                  <template #default="scope">
+                    <el-tag :type="getStatusTagType(scope.row.status)">{{ scope.row.status }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="280">
+                  <template #default="scope">
+                    <el-button type="text" @click="window.open(scope.row.link)" target="_blank">打开链接</el-button>
+                    <el-button type="text" @click="applyJob(scope.row)" :disabled="scope.row.status !== '未投递'">一键投递</el-button>
+                    <el-button type="text" @click="deleteJob(scope.row.id)" style="color: #f56c6c;">删除</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+
+            <!-- 添加职位弹窗 -->
+            <el-dialog v-model="jobDialogVisible" title="添加职位" width="500px">
+              <el-form :model="jobForm" label-width="80px">
+                <el-form-item label="公司名称">
+                  <el-input v-model="jobForm.company"></el-input>
+                </el-form-item>
+                <el-form-item label="职位名称">
+                  <el-input v-model="jobForm.position"></el-input>
+                </el-form-item>
+                <el-form-item label="薪资">
+                  <el-input v-model="jobForm.salary" placeholder="如：20-40K"></el-input>
+                </el-form-item>
+                <el-form-item label="地点">
+                  <el-input v-model="jobForm.location"></el-input>
+                </el-form-item>
+                <el-form-item label="投递链接">
+                  <el-input v-model="jobForm.link"></el-input>
+                </el-form-item>
+                <el-form-item>
+                  <el-button type="primary" @click="addJob" block>添加</el-button>
+                </el-form-item>
+              </el-form>
+            </el-dialog>
+
+            <!-- 投递弹窗 -->
+            <el-dialog v-model="applyDialogVisible" title="选择简历投递" width="400px">
+              <el-form :model="applyForm" label-width="80px">
+                <el-form-item label="选择简历">
+                  <el-select v-model="applyForm.resumeId" style="width: 100%;">
+                    <el-option 
+                      v-for="resume in resumes" 
+                      :key="resume.id" 
+                      :label="resume.name" 
+                      :value="resume.id"
+                    ></el-option>
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="备注">
+                  <el-input v-model="applyForm.note" type="textarea"></el-input>
+                </el-form-item>
+                <el-form-item>
+                  <el-button type="primary" @click="confirmApply" block>确认投递</el-button>
+                </el-form-item>
+              </el-form>
+            </el-dialog>
+          </div>
+
+          <!-- 投递记录页 -->
+          <div v-if="currentPage === '4'">
+            <el-card class="card">
+              <el-table :data="applications" stripe border>
+                <el-table-column prop="company" label="公司" width="150"></el-table-column>
+                <el-table-column prop="position" label="职位" width="150"></el-table-column>
+                <el-table-column prop="resume_name" label="使用简历" width="150"></el-table-column>
+                <el-table-column prop="applied_at" label="投递时间" width="200"></el-table-column>
+                <el-table-column prop="note" label="备注"></el-table-column>
+              </el-table>
+            </el-card>
+          </div>
+        </el-main>
+      </el-container>
+    </el-container>
+  </div>
+
+  <script>
+    const { createApp, ref, reactive, onMounted, nextTick } = Vue;
+
+    createApp({
+      setup() {
+        // 全局状态
+        const currentUser = ref(null);
+        const currentPage = ref('1');
+        const currentPageTitle = ref('数据统计');
+        const pageTitles = { '1': '数据统计', '2': '简历管理', '3': '职位管理', '4': '投递记录' };
+
+        // 登录注册
+        const loginDialogVisible = ref(true);
+        const loginTab = ref('login');
+        const loginForm = reactive({ username: '', password: '' });
+        const registerForm = reactive({ username: '', password: '' });
+
+        // 简历管理
+        const resumes = ref([]);
+        const resumeDialogVisible = ref(false);
+        const resumeForm = reactive({ name: '', phone: '', email: '' });
+
+        // 职位管理
+        const jobs = ref([]);
+        const jobStatusFilter = ref('all');
+        const jobDialogVisible = ref(false);
+        const jobForm = reactive({ company: '', position: '', salary: '', location: '', link: '' });
+        const applyDialogVisible = ref(false);
+        const applyForm = reactive({ resumeId: null, note: '' });
+        const currentApplyJob = ref(null);
+
+        // 投递记录
+        const applications = ref([]);
+
+        // 数据统计
+        const stats = reactive({ total: 0, status: [], daily: [] });
+        let dailyChart = null;
+        let statusChart = null;
+
+        // ==================== 生命周期 ====================
+        onMounted(() => {
+          // 检查本地登录状态
+          const savedUser = localStorage.getItem('haitou_user');
+          if (savedUser) {
+            currentUser.value = JSON.parse(savedUser);
+            loginDialogVisible.value = false;
+            loadAllData();
+          }
+        });
+
+        // ==================== 通用方法 ====================
+        function handleMenuSelect(index) {
+          currentPage.value = index;
+          currentPageTitle.value = pageTitles[index];
+          if (index === '1') nextTick(initCharts);
+          if (index === '2') loadResumes();
+          if (index === '3') loadJobs();
+          if (index === '4') loadApplications();
+        }
+
+        function loadAllData() {
+          loadStats();
+          loadResumes();
+          loadJobs();
+          loadApplications();
+          nextTick(initCharts);
+        }
+
+        // ==================== 用户模块 ====================
+        async function handleLogin() {
+          try {
+            const res = await axios.post('http://localhost:3000/api/login', loginForm);
+            if (res.data.success) {
+              currentUser.value = res.data.user;
+              localStorage.setItem('haitou_user', JSON.stringify(res.data.user));
+              loginDialogVisible.value = false;
+              ElementPlus.ElMessage.success('登录成功');
+              loadAllData();
+            } else {
+              ElementPlus.ElMessage.error(res.data.message);
+            }
+          } catch (err) {
+            ElementPlus.ElMessage.error('登录失败，请检查网络');
+          }
+        }
+
+        async function handleRegister() {
+          try {
+            const res = await axios.post('http://localhost:3000/api/register', registerForm);
+            if (res.data.success) {
+              ElementPlus.ElMessage.success('注册成功，请登录');
+              loginTab.value = 'login';
+            } else {
+              ElementPlus.ElMessage.error(res.data.message);
+            }
+          } catch (err) {
+            ElementPlus.ElMessage.error('注册失败');
+          }
+        }
+
+        function logout() {
+          currentUser.value = null;
+          localStorage.removeItem('haitou_user');
+          loginDialogVisible.value = true;
+          ElementPlus.ElMessage.success('已退出登录');
+        }
+
+        
+        // ==================== 简历模块 ====================
+        async function loadResumes() {
+          const res = await axios.get('http://localhost:3000/api/resumes', {
+            params: { userId: currentUser.value.id }
+          });
+          resumes.value = res.data;
+        }
+
+        function handleResumeUploadSuccess() {
+          resumeDialogVisible.value = false;
+          ElementPlus.ElMessage.success('简历上传成功');
+          loadResumes();
+          // 重置表单
+          resumeForm.name = '';
+          resumeForm.phone = '';
+          resumeForm.email = '';
+        }
+
+        function downloadResume(row) {
+          if (row.file_path) {
+            window.open(`http://localhost:3000/${row.file_path}`);
+          } else {
+            ElementPlus.ElMessage.warning('该简历没有上传文件');
+          }
+        }
+
+        async function deleteResume(id) {
+          await axios.delete(`http://localhost:3000/api/resumes/${id}`);
+          ElementPlus.ElMessage.success('删除成功');
+          loadResumes();
+        }
+
+        // ==================== 职位模块 ====================
+        async function loadJobs() {
+          const res = await axios.get('http://localhost:3000/api/jobs', {
+            params: { userId: currentUser.value.id, status: jobStatusFilter.value }
+          });
+          jobs.value = res.data;
+        }
+
+        async function addJob() {
+          await axios.post('http://localhost:3000/api/jobs', {
+            userId: currentUser.value.id,
+            ...jobForm
+          });
+          jobDialogVisible.value = false;
+          ElementPlus.ElMessage.success('职位添加成功');
+          loadJobs();
+          // 重置表单
+          Object.assign(jobForm, { company: '', position: '', salary: '', location: '', link: '' });
+        }
+
+        async function crawlJobs() {
+          const loading = ElementPlus.ElLoading.service({ text: '正在抓取职位...' });
+          try {
+            const res = await axios.get('http://localhost:3000/api/jobs/crawl', {
+              params: { userId: currentUser.value.id }
+            });
+            loading.close();
+            ElementPlus.ElMessage.success(`成功抓取 ${res.data.count} 个职位`);
+            loadJobs();
+          } catch (err) {
+            loading.close();
+            ElementPlus.ElMessage.error('抓取失败');
+          }
+        }
+
+        function applyJob(job) {
+          currentApplyJob.value = job;
+          applyDialogVisible.value = true;
+        }
+
+        async function confirmApply() {
+          // 1. 打开投递链接
+          window.open(currentApplyJob.value.link, '_blank');
+          
+          // 2. 自动复制简历信息到剪贴板
+          const resume = resumes.value.find(r => r.id === applyForm.resumeId);
+          const copyText = `姓名：${resume.name}\n电话：${resume.phone}\n邮箱：${resume.email}`;
+          navigator.clipboard.writeText(copyText);
+          ElementPlus.ElMessage.success('简历信息已复制到剪贴板');
+
+          // 3. 记录投递
+          await axios.post('http://localhost:3000/api/applications', {
+            userId: currentUser.value.id,
+            jobId: currentApplyJob.value.id,
+            resumeId: applyForm.resumeId,
+            note: applyForm.note
+          });
+
+          applyDialogVisible.value = false;
+          ElementPlus.ElMessage.success('投递记录已保存');
+          loadJobs();
+          loadApplications();
+          loadStats();
+        }
+
+        async function deleteJob(id) {
+          await axios.delete(`http://localhost:3000/api/jobs/${id}`);
+          ElementPlus.ElMessage.success('删除成功');
+          loadJobs();
+        }
+
+        function getStatusTagType(status) {
+          const map = {
+            '未投递': 'info',
+            '已投递': 'primary',
+            '面试中': 'warning',
+            '已拒绝': 'danger',
+            '已offer': 'success'
+          };
+          return map[status] || 'info';
+        }
+
+        // ==================== 投递记录模块 ====================
+        async function loadApplications() {
+          const res = await axios.get('http://localhost:3000/api/applications', {
+            params: { userId: currentUser.value.id }
+          });
+          applications.value = res.data;
+        }
+
+        // ==================== 数据统计模块 ====================
+        async function loadStats() {
+          const res = await axios.get('http://localhost:3000/api/stats', {
+            params: { userId: currentUser.value.id }
+          });
+          Object.assign(stats, res.data);
+        }
+
+        function initCharts() {
+          // 每日投递量柱状图
+          dailyChart = echarts.init(document.getElementById('dailyChart'));
+          const dailyData = stats.daily.map(item => ({
+            name: item.date.slice(5), // 只显示月-日
+            value: item.count
+          }));
+          dailyChart.setOption({
+            xAxis: { type: 'category', data: dailyData.map(d => d.name) },
+            yAxis: { type: 'value' },
+            series: [{ data: dailyData.map(d => d.value), type: 'bar', color: '#409eff' }]
+          });
+
+          // 状态分布饼图
+          statusChart = echarts.init(document.getElementById('statusChart'));
+          const statusData = stats.status.map(item => ({
+            name: item.status,
+            value: item.count
+          }));
+          statusChart.setOption({
+            tooltip: { trigger: 'item' },
+            series: [{
+              type: 'pie',
+              radius: '70%',
+              data: statusData,
+              emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+            }]
+          });
+
+          // 窗口大小变化时自适应
+          window.addEventListener('resize', () => {
+            dailyChart && dailyChart.resize();
+            statusChart && statusChart.resize();
+          });
+        }
+
+        return {
+          currentUser,
+          currentPage,
+          currentPageTitle,
+          loginDialogVisible,
+          loginTab,
+          loginForm,
+          registerForm,
+          resumes,
+          resumeDialogVisible,
+          resumeForm,
+          jobs,
+          jobStatusFilter,
+          jobDialogVisible,
+          jobForm,
+          applyDialogVisible,
+          applyForm,
+          applications,
+          stats,
+          handleMenuSelect,
+          handleLogin,
+          handleRegister,
+          logout,
+          loadResumes,
+          handleResumeUploadSuccess,
+          downloadResume,
+          deleteResume,
+          loadJobs,
+          addJob,
+          crawlJobs,
+          applyJob,
+          confirmApply,
+          deleteJob,
+          getStatusTagType,
+          loadApplications
+        };
+      }
+    }).use(ElementPlus).mount('#app');
+  </script>
+</body>
+</html>
